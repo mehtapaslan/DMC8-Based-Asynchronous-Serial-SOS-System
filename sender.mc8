@@ -1,0 +1,177 @@
+﻿***** DeedsMcE Project File *****
+* If you read this message, you need to install the last version of Deeds! *
+FVR 3
+SYS 1
+CPU 1
+FCK 2
+ROM 4
+RAM 4
+PIA 0
+PIB 1
+PIC 2
+PID 3
+PIE 4
+PIF 5
+PIG 6
+PIH 7
+POA 0
+POB 1
+POC 2
+POD 3
+POE 4
+POF 5
+POG 6
+POH 7
+INT 007 SRC 002 PRT 000 TMD 001 TIN 019 EIN 003 
+INT 006 SRC 002 PRT 000 TMD 001 TIN 019 EIN 003 
+INT 005 SRC 002 PRT 000 TMD 001 TIN 019 EIN 003 
+INT 004 SRC 002 PRT 000 TMD 001 TIN 019 EIN 003 
+INT 003 SRC 002 PRT 000 TMD 001 TIN 019 EIN 003 
+INT 002 SRC 002 PRT 000 TMD 001 TIN 019 EIN 003 
+INT 001 SRC 002 PRT 000 TMD 001 TIN 019 EIN 003 
+INT 000 SRC 002 PRT 000 TMD 001 TIN 019 EIN 003 
+******* Project File END ********
+;=========================================================
+; DMC8 - SOS LED & RADIO SENDER
+; Sends 'S' or 'O' via Radio and Blinks LED
+;=========================================================
+  
+DATAP       EQU     00h             ; IA Input Port (Button Input)
+TESTP       EQU     01h             ; IB Input Port (TEST BUTTON)
+LED         EQU     02h             ; OC Output Port (LED Output)
+RADIO       EQU     03h             ; OD Output Port (Radio Transmitter)
+TICK        EQU     0E000h          ; Timer Counter
+STATE       EQU     0E001h          ; Blink Sequence Counter (0, 1, 2)
+
+;---------------- RESET VECTOR ---------------------------
+            ORG     0000h
+            JP      START
+
+;---------------- INTERRUPT VECTOR -----------------------
+            ORG     0038h           ; Timer Interrupt Address
+            JP      TIMER_ISR
+            
+            ORG     0100h
+    
+;---------------- INITIALIZATION -------------------------
+START:      LD      SP, 0FFFFh      ; Stack Pointer Security Setting
+            LD      A, 00h
+            OUT     (LED), A        ; Turn LED OFF
+            LD      (TICK), A       ; Tick = 0
+            LD      (STATE), A      ; State = 0
+            
+;---------------- MAIN LOOP ------------------------------
+WAIT_START: 
+            ; 1. TEST BUTTON CHECK
+            IN      A, (TESTP)      ; Read Port 01h (IB)
+            AND     01h             ; Check Bit 0
+            OUT     (LED), A        ; If pressed, Turn LED ON immediately
+
+            ; 2. START BUTTON CHECK
+            IN      A, (DATAP)      ; Read Port 00h (IA)
+            AND     01h             ; Check if Button is pressed
+            JP      Z, WAIT_START   ; If NOT pressed (Zero), keep waiting
+
+            ; Execution reaches here ONLY after button press
+            EI                      ; Enable Interrupts (Start the Timer System
+            
+RUN_FOREVER:
+            HALT                    ; Wait for Interrupt
+            JP      RUN_FOREVER     ; Infinite loop (System never stops)
+
+;---------------- TIMER INTERRUPT ------------------------
+TIMER_ISR:  PUSH    AF              ; Save Processor State
+ 
+            ; 1. TICK INCREASE
+            LD      A, (TICK)
+            INC     A
+            LD      (TICK), A       
+
+            ; 2. DATA TRANSMISSION
+            ; It only works when the timer is 1 (start of the letter).
+            CP      01h
+            CALL    Z, SEND_RADIO_DATA
+
+            ; 3. LETTER CASE (S-O-S)
+            LD      A, (STATE)
+            CP      03h             ; Is first 'S' done?
+            JP      C, DOT_LOGIC
+
+            LD      A, (STATE)
+            CP      06h             ; Is 'O' done?
+            JP      C, DASH_LOGIC
+
+            LD      A, (STATE)
+            CP      09h             ; Is last 'S' done?
+            JP      C, DOT_LOGIC
+
+            JP      RESET_SOS       ; All done, restart sequence
+
+;---------------- LOGIC BLOCKS ---------------------------
+DOT_LOGIC:  LD      A, (TICK)
+            CP      04h             ; Total Time (Short)
+            JP      NC, NEXT_STATE
+            CP      02h             ; ON Time (Short)
+            JP      C, LED_ON    
+            JP      LED_OFF      
+
+DASH_LOGIC: LD      A, (TICK)
+            CP      08h             ; Total Time (Long)
+            JP      NC, NEXT_STATE
+            CP      06h             ; ON Time (Long)
+            JP      C, LED_ON    
+            JP      LED_OFF      
+
+;---------------- SUB FUNCTIONS --------------------------
+LED_ON:     IN      A, (LED)        ; Read PORT C
+            OR      01h             ; Turn on the LED
+            OUT     (LED), A        ; Write to PORT C
+            JP      EXIT_ISR        ; Jump to Exit            
+
+LED_OFF:    IN      A, (LED)        ; Read PORT C
+            AND     0FEh            ; Turn off the LED
+            OUT     (LED), A        ; Write to PORT C
+            JP      EXIT_ISR        ; Jump to Exit
+
+NEXT_STATE: IN      A, (LED)        ; Read PORT C
+            AND     0FEh            ; Turn off the LED
+            OUT     (LED), A        ; Write to PORT C
+
+            LD      A, 00h
+            LD      (TICK), A       ; Reset TICK
+            
+            LD      A, (STATE)      ; Increase STATE
+            INC     A
+            LD      (STATE), A 
+            JP      EXIT_ISR        ; Jump to Exit
+
+RESET_SOS:  LD      A, 00h
+            LD      (STATE), A      ; STATE = 0
+            LD      (TICK), A       ; TICK = 0
+            JP      EXIT_ISR             
+
+;---------------- RADIO FUNCTIONS ------------------------
+SEND_RADIO_DATA: 
+            LD      A, (STATE)      ; Which letter are we on?
+            
+            CP      00h             ; First S?
+            JP      Z, SEND_S
+            
+            CP      03h             ; O?
+            JP      Z, SEND_O
+            
+            CP      06h             ; Last S?
+            JP      Z, SEND_S
+            RET
+
+SEND_S:     LD      A, 53h          ; 'S' Letter
+            OUT     (RADIO), A      ; Send via Radio
+            RET 
+
+SEND_O:     LD      A, 4Fh          ; 'O' Letter
+            OUT     (RADIO), A      ; Send via Radio
+            RET
+
+EXIT_ISR:   POP     AF
+            EI                      ; Re-enable Timer Interrupt
+            RET

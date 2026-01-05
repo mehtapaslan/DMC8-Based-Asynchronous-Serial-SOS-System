@@ -1,4 +1,4 @@
-﻿***** DeedsMcE Project File *****
+***** DeedsMcE Project File *****
 * If you read this message, you need to install the last version of Deeds! *
 FVR 3
 SYS 1
@@ -35,13 +35,13 @@ INT 000 SRC 002 PRT 000 TMD 001 TIN 019 EIN 003
 ; DMC8 - SOS LED & RADIO SENDER
 ; Sends 'S' or 'O' via Radio and Blinks LED
 ;=========================================================
-
-DATAP       EQU 00h         ; IA Input Port (Button Input)
-TESTP       EQU 01h         ; IB Input Port (TEST BUTTON)
-LED         EQU 02h         ; OC Output Port (LED Output)
-RADIO       EQU 03h         ; OD Output Port (Radio Transmitter)
-TICK        EQU 0E000h      ; Timer Counter
-STATE       EQU 0E001h      ; Blink Sequence Counter (0, 1, 2)
+  
+DATAP       EQU     00h             ; IA Input Port (Button Input)
+TESTP       EQU     01h             ; IB Input Port (TEST BUTTON)
+LED         EQU     02h             ; OC Output Port (LED Output)
+RADIO       EQU     03h             ; OD Output Port (Radio Transmitter)
+TICK        EQU     0E000h          ; Timer Counter
+STATE       EQU     0E001h          ; Blink Sequence Counter (0, 1, 2)
 
 ;---------------- RESET VECTOR ---------------------------
             ORG     0000h
@@ -59,31 +59,35 @@ START:      LD      SP, 0FFFFh      ; Stack Pointer Security Setting
             OUT     (LED), A        ; Turn LED OFF
             LD      (TICK), A       ; Tick = 0
             LD      (STATE), A      ; State = 0
-            EI                      ; Enable Interrupts (Start Timer)
-
+            
 ;---------------- MAIN LOOP ------------------------------
-MAIN:       HALT
-            JP      MAIN            ; Executed in the main loop
-    
+WAIT_START: 
+            ; 1. TEST BUTTON CHECK
+            IN      A, (TESTP)      ; Read Port 01h (IB)
+            AND     01h             ; Check Bit 0
+            OUT     (LED), A        ; If pressed, Turn LED ON immediately
+
+            ; 2. START BUTTON CHECK
+            IN      A, (DATAP)      ; Read Port 00h (IA)
+            AND     01h             ; Check if Button is pressed
+            JP      Z, WAIT_START   ; If NOT pressed (Zero), keep waiting
+
+            ; Execution reaches here ONLY after button press
+            EI                      ; Enable Interrupts (Start the Timer System
+            
+RUN_FOREVER:
+            HALT                    ; Wait for Interrupt
+            JP      RUN_FOREVER     ; Infinite loop (System never stops)
+
 ;---------------- TIMER INTERRUPT ------------------------
 TIMER_ISR:  PUSH    AF              ; Save Processor State
  
-            ;0.TEST BUTTON CHECK
-            IN      A, (TESTP)      ; Read Port 01h (IB)
-            AND     01h             ; Check Bit 0
-            JP      NZ, LED_ON ; If pressed, Turn LED ON immediately
-
-            ; 1. BUTTON CONTROL
-            IN      A, (DATAP)
-            AND     01h
-            JP      Z, RESET_ALL
-
-            ; 2. TICK INCREASE
+            ; 1. TICK INCREASE
             LD      A, (TICK)
             INC     A
             LD      (TICK), A       
 
-            ; DATA TRANSMISSION
+            ; 2. DATA TRANSMISSION
             ; It only works when the timer is 1 (start of the letter).
             CP      01h
             CALL    Z, SEND_RADIO_DATA
@@ -145,15 +149,6 @@ RESET_SOS:  LD      A, 00h
             LD      (STATE), A      ; STATE = 0
             LD      (TICK), A       ; TICK = 0
             JP      EXIT_ISR             
-
-RESET_ALL:  IN      A, (LED)        ; Read PORT C
-            AND     0FEh            ; Turn off the LED
-            OUT     (LED), A        ; Write PORT C
-
-            LD      A, 00h
-            LD      (STATE), A      ; STATE = 0
-            LD      (TICK), A       ; TICK = 0
-            JP      EXIT_ISR
 
 ;---------------- RADIO FUNCTIONS ------------------------
 SEND_RADIO_DATA: 
